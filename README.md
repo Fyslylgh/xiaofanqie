@@ -316,25 +316,38 @@ $env:TMP = $env:TEMP  = "$root\.toolchain\tmp"   # Gradle 原生库要解压到�
 
 | 脚本 | 类别 | 用途 |
 | --- | --- | --- |
-| `tools\preview-icon.mjs` | 项目资产 | 解析并校验启动图标的路径，打印 ASCII 预览 |
+| `tools\icon-source.png` | 项目资产 | 图标源图（白图黑底），下面那个脚本的输入 |
+| `tools\make-icon-assets.ps1` | 项目资产 | 从源图生成 `ic_launcher_foreground.png` 与 `ic_app_mark.png` |
+| `tools\preview-icon.mjs` | 项目资产 | 解析并校验矢量图标路径，打印 ASCII 预览 |
 | `tools\make-silence.mjs` | 项目资产 | 生成媒体卡片模式用的静音音轨（`res/raw/silence.wav`） |
 | `tools\run-tests.ps1` | 环境辅助 | 受限环境下跑单元测试的替代方案 |
 | `tools\classpath.init.gradle` | 环境辅助 | 给上面那个脚本用的 Gradle 初始化脚本，导出测试 classpath |
 | `tools\gw.ps1` | 环境辅助 | 带上 `.toolchain/` 环境跑 Gradle |
 | `tools\dl.mjs` / `speed.mjs` | 环境辅助 | 下载与测速（用来挑国内镜像） |
 
-启动图标是手写的 SVG 路径，**写错了不会报错，只会渲染成一片空白**——而这恰恰是启动器里
-第一眼看到的东西。所以 `preview-icon.mjs` 会直接解析 `ic_launcher_foreground.xml` 里的 `pathData`
-（不是在脚本里抄一份坐标，那样脚本永远是对的、校验不到任何东西），把 SVG 的端点参数化还原成
-圆心参数化来核对圆心与半径，再光栅化出来看形状，最后统计着墨像素离中心最远多少、
-是否落在自适应图标的安全区内。改完图标跑一下：
+### 图标是怎么来的
+
+启动图标和通知小图标**不是手画的矢量**，而是从 `tools/icon-source.png` 生成的位图：
 
 ```powershell
-node tools\preview-icon.mjs
+powershell -File tools\make-icon-assets.ps1
 ```
 
-两个 `.ps1` 都带 UTF-8 BOM。这不是洁癖：Windows PowerShell 5.1 对无 BOM 的脚本按 GBK 解码，
-中文注释会被解错并吃掉换行，直接导致语法错误。
+它会做三件事：读出源图的墨迹包围盒、把黑底按亮度抠成全透明（黑→透明，白→不透明，
+边缘靠抗锯齿自然过渡），然后按两种取景各导一份——
+
+- `ic_launcher_foreground.png`：图案占画面 70%，保证落在自适应图标的安全区内
+- `ic_app_mark.png`：图案占 94%，几乎填满，供通知小图标使用
+
+**为什么要抠成透明而不是直接用源图**：通知小图标和控制中心磁贴图标，系统**只取 alpha 通道**
+然后统一染色。源图是白图黑底、alpha 全不透明，直接放上去会被渲染成一个实心方块。
+
+矢量那份只留给控制中心磁贴（`ic_tile.xml`，圆形时钟造型）——它在十几个 dp 下
+比番茄的蒂更容易辨认。改了它之后跑 `node tools\preview-icon.mjs` 核对。
+
+`gw.ps1` 和 `run-tests.ps1` 带 UTF-8 BOM。这不是洁癖：Windows PowerShell 5.1 对无 BOM 的脚本
+按 GBK 解码，中文注释会被解错并吃掉换行，直接导致语法错误。
+`make-icon-assets.ps1` 是纯 ASCII 的，所以不受这条影响。
 
 ## 安装到手机
 

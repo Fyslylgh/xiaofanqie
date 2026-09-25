@@ -103,6 +103,12 @@ object TimerNotifications {
             Intent(context, TimerService::class.java).setAction(TimerService.ACTION_SKIP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val resetIntent = PendingIntent.getService(
+            context,
+            3,
+            Intent(context, TimerService::class.java).setAction(TimerService.ACTION_RESET),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
         // 标题只放阶段名，正文只放任务或状态，两者都不含时间。
         // 时间统一交给系统的 chronometer——它会自己持续走动；
@@ -133,8 +139,10 @@ object TimerNotifications {
             .setChronometerCountDown(state.isRunning)
             .setWhen(System.currentTimeMillis() + state.remainingSeconds * 1000L)
             .setProgress(total, elapsed, false)
+            // 三个操作：重置、暂停/继续、跳过。
             // 媒体卡片的紧凑视图只显示"操作图标"，图标为 0 会渲染成一片空白，
-            // 所以这里必须给真实图标
+            // 所以这里必须给真实图标。
+            .addAction(R.drawable.ic_notif_reset, "重置", resetIntent)
             .addAction(
                 if (state.isRunning) R.drawable.ic_notif_pause else R.drawable.ic_notif_play,
                 toggleAction,
@@ -151,7 +159,8 @@ object TimerNotifications {
                     setStyle(
                         MediaNotificationCompat.MediaStyle()
                             .setMediaSession(mediaToken)
-                            .setShowActionsInCompactView(0, 1),
+                            // 三个都放进紧凑视图，正好占满媒体卡片的一排按钮
+                            .setShowActionsInCompactView(0, 1, 2),
                     )
                 }
             }

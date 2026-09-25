@@ -8,9 +8,12 @@
 //
 // 用法: node tools/preview-icon.mjs
 
-// 可以带上文件路径，默认校验启动图标：
+// 可以带上文件路径，默认校验控制中心磁贴图标：
 //   node tools/preview-icon.mjs
-//   node tools/preview-icon.mjs app/src/main/res/drawable/ic_app_mark.xml
+//   node tools/preview-icon.mjs app/src/main/res/drawable/ic_tile.xml
+//
+// 启动图标和通知小图标现在是位图（由 .toolchain/make-icon-assets.ps1 从源图生成），
+// 不归这个脚本管——它只校验手写的矢量路径。
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ICON = process.argv[2]
   ? path.resolve(process.argv[2])
-  : path.join(root, 'app/src/main/res/drawable/ic_launcher_foreground.xml');
+  : path.join(root, 'app/src/main/res/drawable/ic_tile.xml');
 
 const COLS = 54;
 const ROWS = 54;
@@ -51,6 +54,15 @@ function parsePaths(source) {
     });
   }
   return out;
+}
+
+/** 判断一段子路径是不是"整圆"形状（两段等半径半圆）。 */
+function isFullCircle(circles) {
+  return (
+    circles.length === 2 &&
+    circles[0].rx === circles[1].rx &&
+    circles[0].ry === circles[1].ry
+  );
 }
 
 /** SVG 圆弧的端点参数化 -> 圆心参数化（F.6.5 / F.6.6）。 */
@@ -147,8 +159,10 @@ function buildShapes(p) {
       const arc = arcToCenter(cursor.x, cursor.y, rx, ry, rot, large, sweep, x, y);
       shapes.push({ type: 'arc', ...arc, w: p.strokeWidth, x1: cursor.x, y1: cursor.y, x2: x, y2: y });
       circles.push({ rx, ry });
-      if (circles.length === 2 && circles[0].rx === circles[1].rx) {
-        // 两段等半径半圆拼成一个整圆：填充圆点
+      // 只有"填充且不描边"的整圆才算实心圆点。
+      // 早期版本只看"两段等半径圆弧"就判定为圆点，结果把描边画出来的整圆表盘
+      // 也当成了实心圆——预览里显示成一个大圆盘，图标其实是对的。
+      if (isFullCircle(circles) && p.filled && !p.stroked) {
         shapes.push({ type: 'dot', cx: (cursor.x + x) / 2, cy: (cursor.y + y) / 2, r: rx });
       }
       cursor = { x, y };
@@ -166,7 +180,7 @@ function buildShapes(p) {
       const arc = arcToCenter(cursor.x, cursor.y, rx, ry, rot, large, sweep, x, y);
       shapes.push({ type: 'arc', ...arc, w: p.strokeWidth, x1: cursor.x, y1: cursor.y, x2: x, y2: y });
       circles.push({ rx, ry });
-      if (circles.length === 2 && circles[0].rx === circles[1].rx) {
+      if (isFullCircle(circles) && p.filled && !p.stroked) {
         shapes.push({ type: 'dot', cx: (cursor.x + x) / 2, cy: (cursor.y + y) / 2, r: rx });
       }
       cursor = { x, y };

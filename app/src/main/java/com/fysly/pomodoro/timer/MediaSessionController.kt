@@ -41,6 +41,7 @@ class MediaSessionController(
     private val playAction: () -> Unit,
     private val pauseAction: () -> Unit,
     private val skipAction: () -> Unit,
+    private val resetAction: () -> Unit,
 ) {
 
     private var session: MediaSessionCompat? = null
@@ -88,8 +89,11 @@ class MediaSessionController(
                 override fun onPause() = pauseAction()
                 override fun onStop() = pauseAction()
                 override fun onSkipToNext() = skipAction()
-                // 卡片上不显示上一首，但回调仍然实现掉，避免系统等一个永远不会来的响应
-                override fun onSkipToPrevious() = Unit
+                // 媒体卡片上"上一首"那个位置用来放"重置本阶段"。
+                // 会话的按钮是从 PlaybackState 的 actions 推导出来的，
+                // 声明了 ACTION_SKIP_TO_PREVIOUS 系统才会画出第三个按钮，
+                // 而它对我们来说没有上一首的概念，映射成重置正好。
+                override fun onSkipToPrevious() = resetAction()
             })
             isActive = true
         }
@@ -139,6 +143,7 @@ class MediaSessionController(
                     PlaybackStateCompat.ACTION_PLAY or
                         PlaybackStateCompat.ACTION_PAUSE or
                         PlaybackStateCompat.ACTION_PLAY_PAUSE or
+                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
                         PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
                         PlaybackStateCompat.ACTION_STOP,
                 )

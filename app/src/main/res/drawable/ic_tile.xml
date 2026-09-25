@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  控制中心磁贴图标：圆形时钟。
+
+  和通知小图标（ic_app_mark.png，番茄造型）刻意不同——
+  磁贴显示在控制中心里，尺寸只有十几个 dp，番茄的蒂在这个尺寸下会糊成一团，
+  而圆形表盘 + 指针的形状更简单、辨识度更高。用户明确要求"圆形时钟、大一点"。
+
+  尺寸取舍：表盘外径 20.6，占满 24 视口的 86%。控制中心会把图标再缩一圈，
+  留白太多会显得很小——之前的版本只占 62%，在磁贴上就是一个小点。
+
+  改动后跑 `node tools/preview-icon.mjs` 核对形状。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 表盘：整圆 -->
+    <path
+        android:pathData="M2.8,12 a9.2,9.2 0 1,0 18.4,0 a9.2,9.2 0 1,0 -18.4,0"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round" />
+
+    <!-- 时针：指向左上 -->
+    <path
+        android:pathData="M12,12 L9.3,8.78"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round" />
+
+    <!-- 分针：指向右上，比时针长 -->
+    <path
+        android:pathData="M12,12 L16.18,7.02"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round" />
+
+    <!-- 轴心 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M10.6,12 a1.4,1.4 0 1,0 2.8,0 a1.4,1.4 0 1,0 -2.8,0" />
+</vector>

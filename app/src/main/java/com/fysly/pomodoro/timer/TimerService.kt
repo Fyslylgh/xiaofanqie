@@ -17,8 +17,10 @@ import com.fysly.pomodoro.domain.PomodoroPhase
 import com.fysly.pomodoro.domain.TimerState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
@@ -39,6 +41,10 @@ class TimerService : Service() {
     private var activeTaskTitle: String? = null
     private var lastKey: NotificationKey? = null
     private var foregroundStarted = false
+    private var lastForegroundType = 0
+
+    /** 暂停宽限期的倒计时任务；恢复播放时取消 */
+    private var shutdownJob: Job? = null
 
     /**
      * 媒体卡片模式下的媒体会话。设置里关掉这项时为 null，
@@ -60,6 +66,7 @@ class TimerService : Service() {
         when (intent?.action) {
             ACTION_TOGGLE -> controller.toggle()
             ACTION_SKIP -> controller.skip()
+            ACTION_RESET -> controller.reset()
             ACTION_DISMISS_ALERT -> NotificationManagerCompat.from(this)
                 .cancel(TimerNotifications.ALERT_ID)
 
@@ -78,7 +85,8 @@ class TimerService : Service() {
         promoteToForeground(state)
 
         if (!state.isRunning) {
-            shutdown()
+            // 不是立刻收摊，而是走宽限期：暂停后媒体控件要留一会儿
+            scheduleShutdown()
             return START_NOT_STICKY
         }
         return START_STICKY
@@ -99,11 +107,20 @@ class TimerService : Service() {
         scope.launch {
             controller.state.collect { state ->
                 if (!state.isRunning) {
-                    // 计时停了，服务自己收摊。放在这里而不是让上层调 stopService，
-                    // 是为了避开"服务还没 startForeground 就被停掉"的竞态窗口。
-                    if (foregroundStarted) shutdown()
+                    // 暂停后**不**立刻收摊。
+                    //
+                    // 音乐类应用暂停时，媒体控件会继续留在锁屏和控制中心一段时间，
+                    // 用户从那里点一下就能接着放。之前我们是一停就关服务、释放会话，
+                    // 卡片瞬间消失，体验上就不像"播放器"了。
+                    // 现在给一个宽限期：期间控件还在，点继续就接着走。
+                    if (foregroundStarted) {
+                        switchForegroundType(state)
+                        scheduleShutdown()
+                    }
                     return@collect
                 }
+                cancelShutdown()
+
                 val key = NotificationKey(
                     phase = state.phase,
                     totalSeconds = state.totalSeconds,
@@ -195,6 +212,7 @@ class TimerService : Service() {
             playAction = { controller.start() },
             pauseAction = { controller.pause() },
             skipAction = { controller.skip() },
+            resetAction = { controller.reset() },
         ).also { mediaSession = it }
 
         session.sync(
@@ -210,13 +228,24 @@ class TimerService : Service() {
         notification: android.app.Notification? = null,
     ) {
         val n = notification ?: buildNotification(state)
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            // 媒体卡片模式下要声明成媒体播放型，否则系统不会把这个会话当成正在播放的媒体，
-            // 锁屏播放器和各家音乐卡片都不会理它。
-            //
-            // 但只有在真的播放时才能这么声明：mediaPlayback 型前台服务要求启动时
-            // 确实处于播放状态，「开始后立刻暂停」这条路径会走到这里，那时必须退回 specialUse，
-            // 否则 startForeground 会被系统拒绝。
+        val type = foregroundTypeFor(state)
+        runCatching {
+            ServiceCompat.startForeground(this, TimerNotifications.ONGOING_ID, n, type)
+            foregroundStarted = true
+            lastForegroundType = type
+        }
+    }
+
+    /**
+     * 当前状态该用哪种前台服务类型。
+     *
+     * 媒体卡片模式下要声明成媒体播放型，否则系统不会把这个会话当成正在播放的媒体，
+     * 锁屏播放器和各家音乐卡片都不会理它。但只有在真的播放时才能这么声明——
+     * mediaPlayback 型前台服务要求确实处于播放状态，「开始后立刻暂停」那条路径
+     * 必须退回 specialUse，否则 startForeground 会被系统拒绝。
+     */
+    private fun foregroundTypeFor(state: TimerState): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             if (mediaSession != null && state.isRunning) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
             } else {
@@ -225,13 +254,43 @@ class TimerService : Service() {
         } else {
             0
         }
+
+    /**
+     * 暂停后把前台服务类型从 mediaPlayback 退回 specialUse。
+     * 类型变了必须重新调一次 startForeground 才生效。
+     */
+    private fun switchForegroundType(state: TimerState) {
+        val desired = foregroundTypeFor(state)
+        if (desired == lastForegroundType) return
+        val n = buildNotification(state)
         runCatching {
-            ServiceCompat.startForeground(this, TimerNotifications.ONGOING_ID, n, type)
-            foregroundStarted = true
+            ServiceCompat.startForeground(this, TimerNotifications.ONGOING_ID, n, desired)
+            lastForegroundType = desired
         }
     }
 
+    /**
+     * 暂停宽限期。
+     *
+     * 音乐类应用暂停后媒体控件会继续留一会儿，用户从锁屏或控制中心点一下就能接着放。
+     * 之前我们是一停就关服务、释放会话，卡片瞬间消失，用起来不像播放器。
+     * 现在暂停后服务、常驻通知和媒体会话都再活一段时间，超时才真正收摊。
+     */
+    private fun scheduleShutdown() {
+        if (shutdownJob?.isActive == true) return
+        shutdownJob = scope.launch {
+            delay(PAUSE_LINGER_MS)
+            if (!controller.state.value.isRunning) shutdown()
+        }
+    }
+
+    private fun cancelShutdown() {
+        shutdownJob?.cancel()
+        shutdownJob = null
+    }
+
     private fun shutdown() {
+        cancelShutdown()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         foregroundStarted = false
         stopSelf()
@@ -251,7 +310,11 @@ class TimerService : Service() {
     companion object {
         const val ACTION_TOGGLE = "com.fysly.pomodoro.action.TOGGLE"
         const val ACTION_SKIP = "com.fysly.pomodoro.action.SKIP"
+        const val ACTION_RESET = "com.fysly.pomodoro.action.RESET"
         const val ACTION_DISMISS_ALERT = "com.fysly.pomodoro.action.DISMISS_ALERT"
+
+        /** 暂停后媒体控件的保留时长 */
+        private const val PAUSE_LINGER_MS = 10 * 60 * 1000L
 
         /**
          * 启动前台服务。计时开始时由 [TimerController] 调用。

@@ -69,9 +69,9 @@ class FocusTileService : TileService() {
         val tile = qsTile ?: return
 
         tile.state = if (state.isRunning) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-        // 磁贴统一用应用标记（番茄钟），运行与否靠磁贴自己的底色区分。
-        // 早先切成播放/暂停图标，结果是磁贴在控制中心里认不出属于哪个应用。
-        tile.icon = Icon.createWithResource(this, R.drawable.ic_app_mark)
+        // 磁贴用圆形时钟，而不是通知栏那颗番茄：控制中心里图标只有十几个 dp，
+        // 番茄的蒂在这个尺寸会糊成一团。运行与否靠磁贴自己的底色区分。
+        tile.icon = Icon.createWithResource(this, R.drawable.ic_tile)
 
         // subtitle 从 Android 10 才有，低版本只显示图标和名称
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
