@@ -117,7 +117,7 @@ object TimerNotifications {
         }
 
         return NotificationCompat.Builder(context, CHANNEL_TIMER)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(R.drawable.ic_app_mark)
             // 只作为系统的强调色使用：标准模板拿它给应用图标垫底色，
             // 不会影响通知背景（背景染色要 setColorized，那才是让通知变色的元凶）
             .setColor(accent)
@@ -186,7 +186,7 @@ object TimerNotifications {
         }
 
         return NotificationCompat.Builder(context, CHANNEL_ALERT)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(R.drawable.ic_app_mark)
             .setContentTitle(title)
             .setContentText(message)
             .setContentIntent(contentIntent)

@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  通知小图标：启动图标的精简版。
-  系统只取 alpha 通道并统一染色，所以画成纯白剪影即可。
+  应用标记：番茄钟。
+  果身是留了缺口的圆环（缺口在正上方给蒂让位），蒂是五片圆头花瓣，中间是钟表指针和轴心。
   和启动图标同一套造型，但线宽按 24dp 的显示尺寸加重过——
-  状态栏里只有十几个 dp，细节太多会糊成一团。
+  状态栏和控制中心磁贴都只有十几个 dp，细节太多会糊成一团。
+
+  这份同时用作通知小图标和控制中心磁贴图标，所以叫 ic_app_mark 而不是 ic_notification。
+  系统只取 alpha 通道并统一染色，画成纯白剪影即可。
+
+  改动之后跑 `node tools/preview-icon.mjs` 之外，也建议手工核对一次这里——
+  它是手写路径，写错不会报错、只会渲染成空白。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"

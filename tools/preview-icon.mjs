@@ -8,16 +8,25 @@
 //
 // 用法: node tools/preview-icon.mjs
 
+// 可以带上文件路径，默认校验启动图标：
+//   node tools/preview-icon.mjs
+//   node tools/preview-icon.mjs app/src/main/res/drawable/ic_app_mark.xml
+
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ICON = path.join(root, 'app/src/main/res/drawable/ic_launcher_foreground.xml');
+const ICON = process.argv[2]
+  ? path.resolve(process.argv[2])
+  : path.join(root, 'app/src/main/res/drawable/ic_launcher_foreground.xml');
 
-const VIEW = 108;
 const COLS = 54;
 const ROWS = 54;
+
+// 视口尺寸从 XML 里读，这样同一套工具既能校验 108dp 的启动图标，
+// 也能校验 24dp 的通知/磁贴标记
+let VIEW = 108;
 
 // ---------- 解析 ----------
 
@@ -216,8 +225,11 @@ function covers(shape, px, py) {
 const paths = parsePaths(xml);
 const shapes = paths.flatMap(buildShapes);
 
-console.log(`解析 ${ICON.replace(root + path.sep, '')}`);
-console.log(`  path 数: ${paths.length}，图元数: ${shapes.length}`);
+const viewport = /android:viewportWidth="([\d.]+)"/.exec(xml);
+if (viewport) VIEW = Number(viewport[1]);
+
+console.log(`解析 ${path.relative(root, ICON)}`);
+console.log(`  viewport ${VIEW}   path 数: ${paths.length}，图元数: ${shapes.length}`);
 
 // 圆心参数化校验：所有圆弧的圆心应当一致（果身与蒂共心不算，这里只报告）
 const arcs = shapes.filter((s) => s.type === 'arc');
@@ -247,8 +259,15 @@ for (let row = 0; row < ROWS * 4; row++) {
   }
 }
 console.log(`\n墨迹范围: x ${minX.toFixed(1)}..${maxX.toFixed(1)}  y ${minY.toFixed(1)}..${maxY.toFixed(1)}`);
-console.log(`  着墨像素距中心最远 ${maxInkDist.toFixed(1)}（自适应图标安全区半径 36）`);
-const safe = maxInkDist <= 36;
+
+// 安全区只对自适应图标有意义（108dp 视口）；24dp 的标记整块都是图标，没有这个约束
+const SAFE_RADIUS = 36;
+const center = VIEW / 2;
+const maxInkDistFromCenter = maxInkDist;
+if (VIEW === 108) {
+  console.log(`  着墨像素距中心最远 ${maxInkDistFromCenter.toFixed(1)}（自适应图标安全区半径 ${SAFE_RADIUS}）`);
+}
+const safe = VIEW !== 108 || maxInkDistFromCenter <= SAFE_RADIUS;
 
 // ASCII 预览
 const grid = Array.from({ length: ROWS }, () => Array(COLS).fill(' '));
