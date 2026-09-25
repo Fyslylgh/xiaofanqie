@@ -2,6 +2,12 @@
 
 一个原生 Android 番茄钟，Kotlin + Jetpack Compose 写的，没有第三方 UI 或图表依赖。
 
+## 下载
+
+**⬇ [app-release.apk](https://github.com/Fyslylgh/xiaofanqie/releases/latest)** · 1.4 MB · Android 8.0 及以上
+
+用工程内的调试密钥签名，传到手机上直接安装即可。历史版本见 [Releases](https://github.com/Fyslylgh/xiaofanqie/releases)。
+
 ## 功能
 
 **计时**
