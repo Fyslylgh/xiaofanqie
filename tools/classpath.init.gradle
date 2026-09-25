@@ -1,0 +1,24 @@
+// Local-only helper for the sandboxed environment.
+//
+// Gradle's test worker communicates over piped stdio, which the sandbox denies
+// ("Could not write standard input to Gradle Test Executor"). To work around that,
+// this init script just exports the unit-test runtime classpath, and tools/run-tests.ps1
+// runs JUnitCore directly against it.
+//
+// On a normal machine, plain `gradlew testDebugUnitTest` works and this is not needed.
+//
+// Usage: gradlew -I tools/classpath.init.gradle :app:dumpTestClasspath
+allprojects { p ->
+    p.tasks.register("dumpTestClasspath") {
+        doLast {
+            def testTask = p.tasks.findByName("testDebugUnitTest")
+            if (testTask == null) {
+                throw new GradleException("task testDebugUnitTest not found in " + p.path)
+            }
+            def out = new File(p.rootDir, ".toolchain/test-classpath.txt")
+            out.parentFile.mkdirs()
+            out.withWriter("UTF-8") { it.write(testTask.classpath.asPath) }
+            println "classpath written to: " + out.absolutePath
+        }
+    }
+}

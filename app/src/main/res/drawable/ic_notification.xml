@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  通知小图标：启动图标的精简版。
+  系统只取 alpha 通道并统一染色，所以画成纯白剪影即可。
+  和启动图标同一套造型，但线宽按 24dp 的显示尺寸加重过——
+  状态栏里只有十几个 dp，细节太多会糊成一团。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:pathData="M16.76,8.32 A6.4,6.4 0 1 1 7.24,8.32"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M12,7.9 L10,7.9 M12,7.9 L10.59,6.49 M12,7.9 L12,5.9 M12,7.9 L13.41,6.49 M12,7.9 L14,7.9"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M12,12.6 L10.22,10.99"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.1"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M12,12.6 L15.07,10.2"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.1"
+        android:strokeLineCap="round" />
+
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M11.3,12.6 a0.7,0.7 0 1,0 1.4,0 a0.7,0.7 0 1,0 -1.4,0" />
+</vector>

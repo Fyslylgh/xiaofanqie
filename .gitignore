@@ -1,0 +1,21 @@
+# 本机自带的构建工具链（JDK / Android SDK / Gradle 缓存），三个 G，不进仓库
+.toolchain/
+
+# 构建产物
+build/
+app/build/
+.kotlin/
+# Gradle 的项目级缓存（注意是带点的 .gradle，不要和仓库里的 gradle/ 配置目录混了）
+.gradle/
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# 本地配置：含本机 SDK 路径，Android Studio 会自己生成
+local.properties
+
+# IDE
+.idea/
+*.iml
+.DS_Store

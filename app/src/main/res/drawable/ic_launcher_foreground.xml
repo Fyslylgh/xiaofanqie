@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标前景：黑色底上的白色番茄钟。
+  果身是一段留了缺口的圆环（缺口在正上方，给蒂让位），蒂是五片圆头花瓣，
+  中间是钟表的指针和轴心。
+
+  坐标都是手算的，改动之后请跑 `node tools/preview-icon.mjs` 看一眼形状，
+  路径写错不会报错，只会渲染成空白。
+
+  安全区：整幅图案的墨迹落在以 (54,54) 为心、半径 31.2 的圆内，
+  小于自适应图标 72x72 安全区的半径 36，任何蒙版形状都不会切到。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 果身：从 318° 顺时针绕到 222°，缺口 96° 留在正上方 -->
+    <path
+        android:pathData="M74.44,36.6 A27.5,27.5 0 1 1 33.56,36.6"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="5.2"
+        android:strokeLineCap="round" />
+
+    <!-- 蒂：五片花瓣从同一个圆心向外辐射，圆头收尾 -->
+    <path
+        android:pathData="M54,34.6 L46,34.6 M54,34.6 L48.34,28.94 M54,34.6 L54,26.6 M54,34.6 L59.66,28.94 M54,34.6 L62,34.6"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round" />
+
+    <!-- 时针：指向左上 -->
+    <path
+        android:pathData="M54,55 L46.2,47.98"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round" />
+
+    <!-- 分针：指向右上 -->
+    <path
+        android:pathData="M54,55 L67.4,44.53"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round" />
+
+    <!-- 轴心 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M51.6,55 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0" />
+</vector>
