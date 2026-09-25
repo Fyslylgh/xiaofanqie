@@ -209,9 +209,41 @@ mediaPlayer = MediaPlayer().apply { /* res/raw/silence.wav, isLooping = true */ 
   确实处于播放状态，「开始后立刻暂停」那条路径必须退回 `specialUse`，否则系统会拒绝。
 - **通知换成 `MediaStyle`** 并绑定会话 token。操作按钮必须给真实图标：
   媒体卡片的紧凑视图只显示图标，图标传 0 会渲染成一片空白。
+- **会话只声明三个 action**，和通知上的三个按钮一一对应：
+  `ACTION_SKIP_TO_PREVIOUS`（重置，环形箭头）/ `ACTION_PLAY_PAUSE`（暂停继续）/
+  `ACTION_SKIP_TO_NEXT`（跳过）。刻意**不**声明 `ACTION_STOP`——那会让卡片多出一个
+  "停止"按钮，而它跟暂停在我们这里是同一个动作，多出来的按钮只会让人困惑。
+- **`setSessionActivity` 指回应用**，否则点媒体卡片什么都不会发生。
 - **封面用启动图标渲染成位图。** 自适应图标是 XML，`BitmapFactory` 解不了，只能走 `Drawable` 绘制。
 - 媒体卡片的进度条用的是 `position / duration`，而会话只能往前走、做不出倒计时，
   所以卡片上显示的是「已过去 / 总时长」，不是剩余时间。
+
+### 暂停之后控件必须还能点
+
+这是上一版的实测问题：暂停 10 分钟后服务直接 `stopSelf`，会话跟着释放，**媒体卡片消失**，
+于是"暂停之后再也点不动"是必然的——控件本身已经没有了。
+
+现在暂停只做两件事：把前台服务类型退回 `specialUse`，然后排一个"降级"任务。
+到点后调用 `stopForeground(STOP_FOREGROUND_DETACH)` **退出前台但保留通知与会话**
+（用 `REMOVE` 会把通知一起撤掉，卡片照样消失），服务继续活在后台。
+这样暂停多久都能从锁屏、控制中心或流体云点回来；代价只是暂停期间进程不再受前台服务保护。
+
+### 状态并发：媒体控件的按钮走的是 Binder 线程
+
+媒体会话的回调**不在主线程上**，而是系统的 Binder 线程。也就是说改计时状态的入口有四个：
+
+| 入口 | 线程 |
+| --- | --- |
+| tick 循环（每秒 4 次） | 应用级 `Dispatchers.Default` |
+| 界面按钮 | 主线程 |
+| 通知上的按钮 | 主线程 |
+| 锁屏 / 控制中心 / 流体云的按钮 | 系统 Binder 线程 |
+
+它们做的都是"读状态 → 引擎算新状态 → 写回"这三步。不加锁的话，
+一次 tick 的写回可以把用户刚按下的暂停整个盖掉，表现就是媒体控件上的按钮
+**"有时候按了没反应"**。`TimerController` 因此用一把 `ReentrantLock` 把所有这些
+读写串起来；锁是可重入的，所以内部方法互相调用不会自锁。
+落盘是挂起操作，一律放到锁外。
 
 ### 封面
 
@@ -316,8 +348,11 @@ $env:TMP = $env:TEMP  = "$root\.toolchain\tmp"   # Gradle 原生库要解压到�
 
 | 脚本 | 类别 | 用途 |
 | --- | --- | --- |
-| `tools\icon-source.png` | 项目资产 | 图标源图（白图黑底），下面那个脚本的输入 |
-| `tools\make-icon-assets.ps1` | 项目资产 | 从源图生成 `ic_launcher_foreground.png` 与 `ic_app_mark.png` |
+| `tools\icon-source.png` | 项目资产 | 图标源图（白图黑底，但被裁到了墨迹外接框，外圈不完整） |
+| `tools\analyze-icon-ring.mjs` | 项目资产 | 从源图量出环的几何，补全外圈并重新排出留白，生成 `icon-source-padded.png` |
+| `tools\icon-source-padded.png` | 项目资产 | 补全后的源图，**图标的输入是它，不是 `icon-source.png`** |
+| `tools\make-icon-assets.ps1` | 项目资产 | 从补全后的源图生成 `ic_launcher_foreground.png` 与 `ic_app_mark.png` |
+| `tools\preview-launcher-icon.mjs` | 项目资产 | 按自适应图标的安全区合成预览，检查环有没有被蒙版切到 |
 | `tools\preview-icon.mjs` | 项目资产 | 解析并校验矢量图标路径，打印 ASCII 预览 |
 | `tools\make-silence.mjs` | 项目资产 | 生成媒体卡片模式用的静音音轨（`res/raw/silence.wav`） |
 | `tools\run-tests.ps1` | 环境辅助 | 受限环境下跑单元测试的替代方案 |
@@ -327,20 +362,46 @@ $env:TMP = $env:TEMP  = "$root\.toolchain\tmp"   # Gradle 原生库要解压到�
 
 ### 图标是怎么来的
 
-启动图标和通知小图标**不是手画的矢量**，而是从 `tools/icon-source.png` 生成的位图：
+启动图标和通知小图标**不是手画的矢量**，而是从位图源图生成的。整条链路是三步：
 
 ```powershell
-powershell -File tools\make-icon-assets.ps1
+node tools\analyze-icon-ring.mjs        # 1. 量几何、补全外圈 -> icon-source-padded.png
+powershell -File tools\make-icon-assets.ps1   # 2. 导出启动图标与通知小图标
+node tools\preview-launcher-icon.mjs    # 3. 按安全区合成预览，肉眼确认没被切
 ```
 
-它会做三件事：读出源图的墨迹包围盒、把黑底按亮度抠成全透明（黑→透明，白→不透明，
-边缘靠抗锯齿自然过渡），然后按两种取景各导一份——
+#### 为什么需要第 1 步（这是踩过的坑）
 
-- `ic_launcher_foreground.png`：图案占画面 70%，保证落在自适应图标的安全区内
-- `ic_app_mark.png`：图案占 94%，几乎填满，供通知小图标使用
+`tools/icon-source.png` 是从原图**裁到墨迹外接框**得到的，而番茄外圈那个环本身比外接框还大
+（它是圆角方形，四个角伸到框外面），于是环在上下左右和四个角上都被切掉了一截。
+
+后果不是"图小了一点"这么简单：一张已经被裁到边的图，**无论缩到多小放进自适应图标，
+它的边缘永远贴着画布边缘**，各家启动器的圆形蒙版一切，外圈就没了。
+上一版就是这么翻车的——用户看到的是"裁切太狠、外面一圈都没了"。
+
+`analyze-icon-ring.mjs` 的做法：
+
+- 从像素上量出环的外缘半径 `r(θ)` 与线宽（正上方被花萼压住的那一段，量到的是花萼，
+  用低阶傅里叶级数平滑过去，并用"拟合残差"迭代剔除离群方向，残差 rms < 1px）；
+- 由 `r(θ)` 反解圆角半径，算出环上离圆心最远的点——**是四个角，不是四条边**；
+- 按自适应图标的安全区（108dp 画布中央那个 66dp 的圆，再留 1.12 倍余量）反推画布尺寸，
+  把源图贴到中央，再用径向距离场把整圈环补画一遍；
+- 源图里已经有墨迹的地方**保留原像素**，只补被切掉的那几段，接缝才均匀。
+
+#### 第 2、3 步
+
+`make-icon-assets.ps1` 读的是**补全后的源图**，把黑底按亮度抠成全透明
+（黑→透明，白→不透明，边缘靠抗锯齿自然过渡），按两种取景各导一份：
+
+- `ic_launcher_foreground.png`：整张源画布 1:1 铺进 432px 前景。
+  **不能按"墨迹外接框"去缩放**——那样会把环放大 1.4 倍，直接捅穿安全区
+- `ic_app_mark.png`：墨迹占 96%，几乎填满，供通知小图标使用
 
 **为什么要抠成透明而不是直接用源图**：通知小图标和控制中心磁贴图标，系统**只取 alpha 通道**
-然后统一染色。源图是白图黑底、alpha 全不透明，直接放上去会被渲染成一个实心方块。
+然后统一染色；而自适应图标的前景如果带着不透明的黑底，会在背景层之上盖出一块黑方块。
+
+`preview-launcher-icon.mjs` 会打印"墨迹离圆心最远多少 dp"并画出安全区边界，
+这是可以自动判定的那一半；剩下那一半靠看图——环越没越过那条橙圈。
 
 矢量那份只留给控制中心磁贴（`ic_tile.xml`，圆形时钟造型）——它在十几个 dp 下
 比番茄的蒂更容易辨认。改了它之后跑 `node tools\preview-icon.mjs` 核对。
@@ -420,6 +481,9 @@ powershell -File tools\make-icon-assets.ps1
 - **媒体卡片模式已在一加 PJZ110 / Android 17 上验证可用**：锁屏播放器和桌面音乐卡片都能显示
   倒计时，进度条随计时推进，暂停/跳过按钮工作正常。但这套做法建立在"系统把静音音轨的会话
   当成活跃媒体"之上，换到别的 ROM 或厂商收紧静音音频管控后未必成立，目前只有这一台机器的实测数据。
+- **还没有设备可以在开发机上直连**（`adb devices` 为空），所以下面这些只在编译与单元测试层面验证过：
+  图标的取景由 `tools/preview-launcher-icon.mjs` 按安全区合成预览确认，
+  媒体控件的并发修复只有代码层面的论证。上机实测仍是必要的最后一步。
 - **已在真机上验证过的部分**：一加 PJZ110 / Android 17（API 37）。计时、通知、
   响铃震动、任务与统计、媒体卡片模式都能正常使用。期间修掉了两个真机上才暴露的问题——
   重启后 `elapsedRealtime` 归零导致剩余时间显示成 32 小时（`PomodoroEngine.restore`），

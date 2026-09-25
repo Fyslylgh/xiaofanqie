@@ -1,6 +1,8 @@
 package com.fysly.pomodoro.timer
 
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -12,6 +14,7 @@ import android.media.MediaPlayer
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
+import com.fysly.pomodoro.MainActivity
 import com.fysly.pomodoro.R
 import com.fysly.pomodoro.data.CustomArtworkStore
 import com.fysly.pomodoro.data.MediaArtwork
@@ -95,10 +98,22 @@ class MediaSessionController(
                 // 而它对我们来说没有上一首的概念，映射成重置正好。
                 override fun onSkipToPrevious() = resetAction()
             })
+            // 卡片被点开时回到应用。不设这个的话，点媒体卡片什么都不会发生
+            // （桌面上的音乐卡片、锁屏播放器都靠它）。
+            setSessionActivity(contentIntent())
             isActive = true
         }
         session = created
     }
+
+    private fun contentIntent(): PendingIntent = PendingIntent.getActivity(
+        context,
+        CONTENT_INTENT_REQUEST,
+        Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        },
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
 
     private fun applyState(
         state: TimerState,
@@ -137,6 +152,13 @@ class MediaSessionController(
 
         // 媒体卡片的进度条用的是 position / duration。
         // 会话只能"往前走"，做不出倒计时，所以卡片上会显示"已过去 / 总时长"。
+        //
+        // 只声明三个 action，和通知上的三个按钮一一对应：
+        //   ACTION_SKIP_TO_PREVIOUS -> 重置（环形箭头图标）
+        //   ACTION_PLAY_PAUSE        -> 暂停 / 继续
+        //   ACTION_SKIP_TO_NEXT      -> 跳过
+        // 不要把 ACTION_STOP 也声明上：那会让卡片多出一个"停止"按钮，
+        // 而它跟暂停在我们这里是同一个动作，多出来的按钮只会让人困惑。
         s.setPlaybackState(
             PlaybackStateCompat.Builder()
                 .setActions(
@@ -144,8 +166,7 @@ class MediaSessionController(
                         PlaybackStateCompat.ACTION_PAUSE or
                         PlaybackStateCompat.ACTION_PLAY_PAUSE or
                         PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                        PlaybackStateCompat.ACTION_STOP,
+                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT,
                 )
                 .setState(
                     if (state.isRunning) {
@@ -214,14 +235,19 @@ class MediaSessionController(
 
     /**
      * 媒体卡片需要一个方形封面，这里把启动图标画成位图。
-     * 图标是自适应图标（XML），BitmapFactory 解不了，只能走 Drawable 绘制。
+     *
+     * 自适应图标是 XML，`BitmapFactory` 解不了，只能走 Drawable 绘制；
+     * 而且直接把整份自适应图标（含蒙版）画出来会得到一个白色圆角方块，
+     * 所以宁可只画前景那一层，衬在黑底上。
      */
     private fun renderLauncherIcon(): Bitmap? = runCatching {
         val size = ARTWORK_SIZE_PX
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.BLACK)
         val drawable = context.packageManager.getApplicationIcon(context.packageName)
         drawable.setBounds(0, 0, size, size)
-        drawable.draw(Canvas(bitmap))
+        drawable.draw(canvas)
         bitmap
     }.getOrNull()
 
@@ -266,5 +292,6 @@ class MediaSessionController(
         const val SESSION_TAG = "PomodoroTimer"
         const val ARTWORK_SIZE_PX = 1024
         const val GRADIENT_DARKEN = 0.32f
+        const val CONTENT_INTENT_REQUEST = 10
     }
 }

@@ -43,8 +43,17 @@ class TimerService : Service() {
     private var foregroundStarted = false
     private var lastForegroundType = 0
 
-    /** 暂停宽限期的倒计时任务；恢复播放时取消 */
-    private var shutdownJob: Job? = null
+    /**
+     * 是否已经从"前台服务"降级成普通后台服务。
+     *
+     * 降级之后不能再调 startForeground：应用在后台时系统会直接拒绝。
+     * 单看 [foregroundStarted] 分不出"从没进过前台"（那种情况必须调 startForeground
+     * 来兑现 startForegroundService 的契约）和"进过又退出来了"，所以单独记一个标志。
+     */
+    private var demoted = false
+
+    /** 暂停后"降级为后台服务"的定时任务；重新开始计时时取消 */
+    private var demotionJob: Job? = null
 
     /**
      * 媒体卡片模式下的媒体会话。设置里关掉这项时为 null，
@@ -78,17 +87,24 @@ class TimerService : Service() {
         // 先让媒体会话进入播放状态，再进前台：媒体播放型前台服务要求启动时确实在播放
         syncMedia(state)
 
-        // 必须先满足 startForegroundService 的契约再决定去留：
-        // 用 startForegroundService 拉起来的服务如果没调用 startForeground 就自己停掉，
-        // 系统会抛 ForegroundServiceDidNotStartInTimeException 把进程干掉。
-        // 「开始后立刻暂停」正好会走到这里，所以这一句不能省。
-        promoteToForeground(state)
-
-        if (!state.isRunning) {
-            // 不是立刻收摊，而是走宽限期：暂停后媒体控件要留一会儿
-            scheduleShutdown()
-            return START_NOT_STICKY
+        // 服务已经被降级成普通后台服务（暂停期间），这时不能再 startForeground——
+        // 应用在后台调用 startForeground 会被系统拒绝。保留原有的 notify 路径就行。
+        if (state.isRunning) {
+            cancelDemotion()
+            // 必须先满足 startForegroundService 的契约再决定去留：
+            // 用 startForegroundService 拉起来的服务如果没调用 startForeground 就自己停掉，
+            // 系统会抛 ForegroundServiceDidNotStartInTimeException 把进程干掉。
+            // 「开始后立刻暂停」正好会走到这里，所以这一句不能省。
+            promoteToForeground(state)
+            return START_STICKY
         }
+
+        if (!foregroundStarted && !demoted) {
+            // 这一轮 startForegroundService 必须有个交代
+            promoteToForeground(state)
+        }
+        // 不是立刻收摊，而是走宽限期：暂停后媒体控件要留着，用户随时能点回来
+        scheduleDemotion()
         return START_STICKY
     }
 
@@ -98,6 +114,7 @@ class TimerService : Service() {
         mediaSession = null
         scope.cancel()
         foregroundStarted = false
+        demoted = false
         super.onDestroy()
     }
 
@@ -107,19 +124,21 @@ class TimerService : Service() {
         scope.launch {
             controller.state.collect { state ->
                 if (!state.isRunning) {
-                    // 暂停后**不**立刻收摊。
+                    // 暂停后**不**收摊。
                     //
-                    // 音乐类应用暂停时，媒体控件会继续留在锁屏和控制中心一段时间，
-                    // 用户从那里点一下就能接着放。之前我们是一停就关服务、释放会话，
-                    // 卡片瞬间消失，体验上就不像"播放器"了。
-                    // 现在给一个宽限期：期间控件还在，点继续就接着走。
+                    // 音乐类应用暂停时，媒体控件会继续留在锁屏和控制中心，用户从那里
+                    // 点一下就能接着放。所以暂停只做两件事：把前台服务类型退回 specialUse
+                    // （mediaPlayback 型要求确实在播放），然后排一个"降级"任务。
+                    // 降级只是退出前台，通知和媒体会话都留着——这样暂停多久都能点回来。
                     if (foregroundStarted) {
                         switchForegroundType(state)
-                        scheduleShutdown()
+                        scheduleDemotion()
                     }
+                    syncMedia(state)
+                    postOngoing(state)
                     return@collect
                 }
-                cancelShutdown()
+                cancelDemotion()
 
                 val key = NotificationKey(
                     phase = state.phase,
@@ -176,7 +195,9 @@ class TimerService : Service() {
 
     private fun postOngoing(state: TimerState) {
         val notification = buildNotification(state)
-        if (foregroundStarted) {
+        if (foregroundStarted || demoted) {
+            // 前台服务已经在跑，或者已经降级成后台服务：前者用 notify 更新内容，
+            // 后者绝不能再 startForeground（应用在后台时会被系统拒绝）。
             runCatching {
                 NotificationManagerCompat.from(this).notify(TimerNotifications.ONGOING_ID, notification)
             }
@@ -233,6 +254,7 @@ class TimerService : Service() {
             ServiceCompat.startForeground(this, TimerNotifications.ONGOING_ID, n, type)
             foregroundStarted = true
             lastForegroundType = type
+            demoted = false
         }
     }
 
@@ -272,27 +294,49 @@ class TimerService : Service() {
     /**
      * 暂停宽限期。
      *
-     * 音乐类应用暂停后媒体控件会继续留一会儿，用户从锁屏或控制中心点一下就能接着放。
-     * 之前我们是一停就关服务、释放会话，卡片瞬间消失，用起来不像播放器。
-     * 现在暂停后服务、常驻通知和媒体会话都再活一段时间，超时才真正收摊。
+     * 音乐类应用暂停后媒体控件会继续留在锁屏和控制中心，用户从那里点一下就能接着放。
+     * 之前这里是在宽限期结束后 stopSelf——服务一停、会话就释放，媒体卡片随之消失，
+     * 于是"暂停之后再也点不动"就成了必然：控件本身已经没有了。
+     *
+     * 现在改成**降级**而不是收摊：退出前台（通知留着），服务继续活着。
+     * 这样暂停多久都能从媒体控件点回来，代价只是暂停期间进程不再受前台服务保护
+     * （系统要回收就回收，计时状态本来也已经落盘）。
      */
-    private fun scheduleShutdown() {
-        if (shutdownJob?.isActive == true) return
-        shutdownJob = scope.launch {
+    private fun scheduleDemotion() {
+        if (demotionJob?.isActive == true) return
+        demotionJob = scope.launch {
             delay(PAUSE_LINGER_MS)
-            if (!controller.state.value.isRunning) shutdown()
+            if (!controller.state.value.isRunning) demoteToBackground()
         }
     }
 
-    private fun cancelShutdown() {
-        shutdownJob?.cancel()
-        shutdownJob = null
+    private fun cancelDemotion() {
+        demotionJob?.cancel()
+        demotionJob = null
     }
 
+    /**
+     * 退出前台，但保留常驻通知与媒体会话。
+     *
+     * 用 STOP_FOREGROUND_DETACH 而不是 REMOVE：REMOVE 会把通知一起撤掉，
+     * 那样媒体卡片（以及 OPPO 流体云）会立刻消失，用户再也点不到"继续"。
+     */
+    private fun demoteToBackground() {
+        cancelDemotion()
+        if (!foregroundStarted) return
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_DETACH) }
+        foregroundStarted = false
+        lastForegroundType = 0
+        demoted = true
+    }
+
+    /** 完全收摊：撤掉通知、停掉服务。目前只有 onDestroy 之外的手动路径会用。 */
     private fun shutdown() {
-        cancelShutdown()
+        cancelDemotion()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         foregroundStarted = false
+        lastForegroundType = 0
+        demoted = false
         stopSelf()
     }
 
@@ -313,8 +357,8 @@ class TimerService : Service() {
         const val ACTION_RESET = "com.fysly.pomodoro.action.RESET"
         const val ACTION_DISMISS_ALERT = "com.fysly.pomodoro.action.DISMISS_ALERT"
 
-        /** 暂停后媒体控件的保留时长 */
-        private const val PAUSE_LINGER_MS = 10 * 60 * 1000L
+        /** 暂停后多久把前台服务降级为普通后台服务（通知与媒体会话保留） */
+        private const val PAUSE_LINGER_MS = 60 * 1000L
 
         /**
          * 启动前台服务。计时开始时由 [TimerController] 调用。

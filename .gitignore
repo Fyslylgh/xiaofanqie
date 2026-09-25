@@ -15,6 +15,9 @@ app/build/
 # 本地配置：含本机 SDK 路径，Android Studio 会自己生成
 local.properties
 
+# 图标校验预览图：随图标重新生成，不进仓库
+tools/icon-preview.png
+
 # IDE
 .idea/
 *.iml
